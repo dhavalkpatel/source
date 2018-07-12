@@ -1,11 +1,5 @@
-test git
-whom to blame
-<<<<<<< HEAD
-3swtching to new branch
-4swtching to new branch
-learning branching12
-reset
-=======
-4swtching to new branch
-learning branching11
->>>>>>> 2.0
+Test1
+Test2
+Test3
+Test4
+Test5
