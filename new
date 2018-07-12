@@ -1,9 +1,6 @@
 test git
 whom to blame
-<<<<<<< HEAD
 3swtching to new branch
-=======
 4swtching to new branch
->>>>>>> 2.0
-learning branching
+learning branching12
 reset
