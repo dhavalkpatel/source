@@ -1,33 +1,25 @@
 parameters:
+  - name: displayName
+    type: string
+    default: Generate release notes
+
   - name: outputFile
     type: string
 
-  - name: releaseTitle
-    type: string
-
-  - name: detailLevel
-    type: string
-    default: full
-    values:
-      - full
-      - summary
-
-  # A repository-relative Handlebars template. When supplied, it overrides
-  # detailLevel and lets a pipeline choose precisely which sections it needs.
+  # Use .platform/release-notes/release-notes-full.md, the summary variant,
+  # or an application-owned Handlebars Markdown file.
   - name: templateFile
     type: string
-    default: ''
 
   - name: checkStage
     type: boolean
-    default: true
+    default: false
 
   - name: overrideStageName
     type: string
     default: ''
 
-  # Set this for a pipeline-resource release to generate notes for the
-  # consumed build instead of the release pipeline's own build.
+  # Use this when the release pipeline consumes a build pipeline resource.
   - name: activeBuildReleaseId
     type: string
     default: ''
@@ -52,6 +44,14 @@ parameters:
     type: boolean
     default: true
 
+  - name: getPRDetailsRepositoryId
+    type: string
+    default: ''
+
+  - name: getPRDetailsRefName
+    type: string
+    default: ''
+
   - name: getIndirectPullRequests
     type: boolean
     default: false
@@ -59,6 +59,50 @@ parameters:
   - name: checkForManuallyLinkedWI
     type: boolean
     default: false
+
+  - name: recursivelyCheckConsumedArtifacts
+    type: boolean
+    default: false
+
+  - name: showOnlyPrimary
+    type: boolean
+    default: false
+
+  - name: searchCrossProjectForPRs
+    type: boolean
+    default: false
+
+  - name: sortWorkItems
+    type: boolean
+    default: false
+
+  - name: sortCommits
+    type: boolean
+    default: false
+
+  - name: includePartiallySuccessful
+    type: boolean
+    default: false
+
+  - name: stopOnRedeploy
+    type: boolean
+    default: false
+
+  - name: tags
+    type: string
+    default: ''
+
+  - name: wiqlWhereClause
+    type: string
+    default: ''
+
+  - name: wiqlFromTarget
+    type: string
+    default: WorkItems
+
+  - name: wiqlSharedQueryName
+    type: string
+    default: ''
 
   - name: dumpPayload
     type: boolean
@@ -68,11 +112,17 @@ parameters:
     type: string
     default: '$(Agent.TempDirectory)\release-notes-payload.json'
 
+  - name: maxRetries
+    type: string
+    default: '3'
+
 steps:
   - task: richardfennellBM.BM-VSTS-XplatGenerateReleaseNotes.XplatGenerate-Release-Notes.XplatGenerateReleaseNotes@4
-    displayName: Generate release notes
+    displayName: '${{ parameters.displayName }}'
     inputs:
       outputfile: '${{ parameters.outputFile }}'
+      templateLocation: File
+      templatefile: '${{ parameters.templateFile }}'
       replaceFile: true
       appendToFile: false
       checkStage: ${{ parameters.checkStage }}
@@ -83,193 +133,23 @@ steps:
       getAllParents: ${{ parameters.getAllParents }}
       getTestedBy: ${{ parameters.getTestedBy }}
       getPRDetails: ${{ parameters.getPRDetails }}
+      getPRDetailsRepositoryId: '${{ parameters.getPRDetailsRepositoryId }}'
+      getPRDetailsRefName: '${{ parameters.getPRDetailsRefName }}'
       getIndirectPullRequests: ${{ parameters.getIndirectPullRequests }}
       checkForManuallyLinkedWI: ${{ parameters.checkForManuallyLinkedWI }}
+      recursivelyCheckConsumedArtifacts: ${{ parameters.recursivelyCheckConsumedArtifacts }}
+      showOnlyPrimary: ${{ parameters.showOnlyPrimary }}
+      searchCrossProjectForPRs: ${{ parameters.searchCrossProjectForPRs }}
+      sortWi: ${{ parameters.sortWorkItems }}
+      sortCS: ${{ parameters.sortCommits }}
+      considerPartiallySuccessfulReleases: ${{ parameters.includePartiallySuccessful }}
+      stopOnRedeploy: ${{ parameters.stopOnRedeploy }}
+      tags: '${{ parameters.tags }}'
+      wiqlWhereClause: '${{ parameters.wiqlWhereClause }}'
+      wiqlFromTarget: '${{ parameters.wiqlFromTarget }}'
+      wiqlSharedQueryName: '${{ parameters.wiqlSharedQueryName }}'
       dumpPayloadToConsole: false
       dumpPayloadToFile: ${{ parameters.dumpPayload }}
       dumpPayloadFileName: '${{ parameters.payloadFile }}'
+      maxRetries: '${{ parameters.maxRetries }}'
       stopOnError: true
-      ${{ if ne(parameters.templateFile, '') }}:
-        templateLocation: File
-        templatefile: '${{ parameters.templateFile }}'
-      ${{ else }}:
-        templateLocation: InLine
-        ${{ if eq(parameters.detailLevel, 'summary') }}:
-          inlinetemplate: |
-            # ${{ parameters.releaseTitle }}
-
-            - **Pipeline**: {{buildDetails.definition.name}}
-            - **Build Number**: {{buildDetails.buildNumber}}
-            - **Build ID**: {{buildDetails.id}}
-            - **Branch**: {{buildDetails.sourceBranch}}
-            - **Completed**: {{buildDetails.finishTime}}
-            {{#if compareBuildDetails}}
-            - **Previous Build**: {{compareBuildDetails.buildNumber}}
-            {{/if}}
-
-            {{#if pullRequests.length}}
-            ## Associated Pull Requests ({{pullRequests.length}})
-            {{#forEach pullRequests}}
-            - **{{this.pullRequestId}}** {{this.title}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if workItems.length}}
-            ## Associated Work Items ({{workItems.length}})
-            {{#forEach workItems}}
-            - **{{this.id}}** {{lookup this.fields 'System.Title'}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if commits.length}}
-            ## Associated Commits ({{commits.length}})
-            {{#forEach commits}}
-            - **{{truncate this.id 7}}** {{get_only_message_firstline this.message}}
-            {{/forEach}}
-            {{/if}}
-        ${{ else }}:
-          inlinetemplate: |
-            # ${{ parameters.releaseTitle }}
-
-            ## Build Details
-            - **Pipeline**: {{buildDetails.definition.name}}
-            - **Build Number**: {{buildDetails.buildNumber}}
-            - **Build ID**: {{buildDetails.id}}
-            - **Branch**: {{buildDetails.sourceBranch}}
-            - **Tags**: {{buildDetails.tags}}
-            - **Completed**: {{buildDetails.finishTime}}
-            {{#if compareBuildDetails}}
-            - **Previous Build**: {{compareBuildDetails.buildNumber}}
-            - **Previous Build ID**: {{compareBuildDetails.id}}
-            {{/if}}
-            {{#if currentStage}}
-            - **Deployment Stage**: {{currentStage.name}}
-            {{/if}}
-
-            {{#if pullRequests.length}}
-            ## Associated Pull Requests ({{pullRequests.length}})
-            {{#forEach pullRequests}}
-            - **[{{this.pullRequestId}}]({{replace (replace this.url "_apis/git/repositories" "_git") "pullRequests" "pullRequest"}})** {{this.title}}
-              - Associated work items:
-            {{#forEach this.associatedWorkitems}}
-              {{#with (lookup_a_work_item ../../relatedWorkItems this.url)}}
-                - [{{this.id}}]({{replace this.url "_apis/wit/workItems" "_workitems/edit"}}) {{lookup this.fields 'System.Title'}}
-              {{/with}}
-            {{/forEach}}
-              - Associated commits:
-            {{#forEach this.associatedCommits}}
-                - [{{truncate this.commitId 7}}]({{this.remoteUrl}}) {{get_only_message_firstline this.comment}}
-            {{/forEach}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if inDirectlyAssociatedPullRequests.length}}
-            ## Indirectly Associated Pull Requests ({{inDirectlyAssociatedPullRequests.length}})
-            {{#forEach inDirectlyAssociatedPullRequests}}
-            - **{{this.pullRequestId}}** {{this.title}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if consumedArtifacts.length}}
-            ## Consumed Artifacts ({{consumedArtifacts.length}})
-            | Category | Type | Version | Commits | Work Items |
-            |-|-|-|-|-|
-            {{#forEach consumedArtifacts}}
-            | {{this.artifactCategory}} | {{this.artifactType}} | {{this.versionName}} | {{this.commits.length}} | {{this.workitems.length}} |
-            {{/forEach}}
-            {{/if}}
-
-            {{#if workItems.length}}
-            ## Associated Work Items ({{workItems.length}})
-            {{#forEach workItems}}
-            - **[{{this.id}}]({{replace this.url "_apis/wit/workItems" "_workitems/edit"}})** {{lookup this.fields 'System.Title'}}
-              - **Type:** {{lookup this.fields 'System.WorkItemType'}}
-              - **Tags:** {{lookup this.fields 'System.Tags'}}
-              - **Assigned:** {{#with (lookup this.fields 'System.AssignedTo')}}{{displayName}}{{/with}}
-              - **Description:** {{{lookup this.fields 'System.Description'}}}
-              - **Pull Requests:**
-            {{#forEach this.relations}}
-              {{#if (contains this.attributes.name 'Pull Request')}}
-                {{#with (lookup_a_pullrequest ../../pullRequests this.url)}}
-                  - {{this.pullRequestId}} {{this.title}}
-                {{/with}}
-              {{/if}}
-            {{/forEach}}
-              - **Parents:**
-            {{#forEach this.relations}}
-              {{#if (contains this.attributes.name 'Parent')}}
-                {{#with (lookup_a_work_item ../../relatedWorkItems this.url)}}
-                  - {{this.id}} {{lookup this.fields 'System.Title'}}
-                  {{#forEach this.relations}}
-                    {{#if (contains this.attributes.name 'Parent')}}
-                      {{#with (lookup_a_work_item ../../../../relatedWorkItems this.url)}}
-                        - {{this.id}} {{lookup this.fields 'System.Title'}}
-                      {{/with}}
-                    {{/if}}
-                  {{/forEach}}
-                {{/with}}
-              {{/if}}
-            {{/forEach}}
-              - **Children:**
-            {{#forEach this.relations}}
-              {{#if (contains this.attributes.name 'Child')}}
-                {{#with (lookup_a_work_item ../../relatedWorkItems this.url)}}
-                  - {{this.id}} {{lookup this.fields 'System.Title'}}
-                {{/with}}
-              {{/if}}
-            {{/forEach}}
-              - **Tested By:**
-            {{#forEach this.relations}}
-              {{#if (contains this.attributes.name 'Tested By')}}
-                {{#with (lookup_a_work_item ../../testedByWorkItems this.url)}}
-                  - {{this.id}} {{lookup this.fields 'System.Title'}}
-                {{/with}}
-              {{/if}}
-            {{/forEach}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if commits.length}}
-            ## Associated Commits ({{commits.length}})
-            {{#forEach commits}}
-            - **{{this.id}}**
-              - **Message:** {{this.message}}
-              - **Committed by:** {{this.author.displayName}}
-              - **Files changed:** {{this.changes.length}}
-            {{#forEach this.changes}}
-                - **Path:** {{this.item.path}}{{this.filename}}
-            {{/forEach}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if tests.length}}
-            ## Automated Tests ({{tests.length}})
-            {{#forEach tests}}
-            - **{{this.id}}** {{this.testCase.name}}: {{this.outcome}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if manualTests.length}}
-            ## Manual Test Plans ({{manualTests.length}})
-            | Run ID | Name | State | Total | Passed |
-            |-|-|-|-|-|
-            {{#forEach manualTests}}
-            | [{{this.id}}]({{this.webAccessUrl}}) | {{this.name}} | {{this.state}} | {{this.totalTests}} | {{this.passedTests}} |
-            {{/forEach}}
-            {{/if}}
-
-            {{#if queryWorkItems.length}}
-            ## Work Items Returned by WIQL ({{queryWorkItems.length}})
-            {{#forEach queryWorkItems}}
-            - **{{this.id}}** {{lookup this.fields 'System.Title'}}
-            {{/forEach}}
-            {{/if}}
-
-            {{#if publishedArtifacts.length}}
-            ## Published Artifacts ({{publishedArtifacts.length}})
-            | Name | Type |
-            |-|-|
-            {{#forEach publishedArtifacts}}
-            | {{this.name}} | {{this.resource.type}} |
-            {{/forEach}}
-            {{/if}}
