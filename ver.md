@@ -1,3 +1,12 @@
+| #     | Information                                      | Expected behaviour                                                                                                                                |
+| ----- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1** | **Open Source Library Name**                     | Clearly display the actual library/package name. The name should be unambiguous and easy to identify.                                             |
+| **2** | **Version Used**                                 | Display the version currently referenced/used by the repository.                                                                                  |
+| **3** | **Latest Version Available**                     | Identify and display the latest available version of the library/package from the relevant package ecosystem.                                     |
+| **4** | **License & Vendor Information**                 | Capture **License Type**, whether the library is **Vendor Supported**, and **Vendor Details**, where applicable.                                  |
+| **5** | **Known Vulnerability / Technical Debt Details** | Identify known vulnerabilities and/or relevant technical debt associated with the library/version and provide meaningful details where available. |
+
+
 # Enterprise Taskfile Versioning & Platform Telemetry
 
 Version: 2.0
