@@ -1,0 +1,17 @@
+# Platform namespace: Sandpiper version generation
+# Included as `sandpiper-version` in the root Taskfile.yml.
+version: '3'
+
+tasks:
+  generate:
+    desc: Generate Sandpiper versions through an application-owned portable provider
+    dir: '{{.USER_WORKING_DIR}}'
+    vars:
+      INITIAL_VERSION_USE_BRANCH_NAME: '{{.INITIAL_VERSION_USE_BRANCH_NAME | default "true"}}'
+      DISABLE_MAJOR_VERSION_INCREMENT: '{{.DISABLE_MAJOR_VERSION_INCREMENT | default "true"}}'
+      DISABLE_MINOR_VERSION_INCREMENT: '{{.DISABLE_MINOR_VERSION_INCREMENT | default "true"}}'
+      UPDATE_BUILD_NUMBER_WITH_BRANCH_VERSION: '{{.UPDATE_BUILD_NUMBER_WITH_BRANCH_VERSION | default "true"}}'
+    requires:
+      vars: [SANDPIPER_VERSION_PROVIDER]
+    cmds:
+      - pwsh -NoProfile -File "{{.SANDPIPER_VERSION_PROVIDER}}" -InitialVersionUseBranchName:{{.INITIAL_VERSION_USE_BRANCH_NAME}} -DisableMajorVersionIncrement:{{.DISABLE_MAJOR_VERSION_INCREMENT}} -DisableMinorVersionIncrement:{{.DISABLE_MINOR_VERSION_INCREMENT}} -UpdateBuildNumberWithBranchVersion:{{.UPDATE_BUILD_NUMBER_WITH_BRANCH_VERSION}}

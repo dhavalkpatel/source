@@ -1,0 +1,16 @@
+# Platform namespace: artifact staging
+# Included as `artifact` in the root Taskfile.yml.
+version: '3'
+
+vars:
+  ARTIFACT_DESTINATION_DIRECTORY: '{{.ARTIFACT_DESTINATION_DIRECTORY | default "./artifacts"}}'
+  ARTIFACT_CLEAN_DESTINATION: '{{.ARTIFACT_CLEAN_DESTINATION | default "false"}}'
+
+tasks:
+  stage-directory:
+    desc: Copy an application directory into an artifact staging directory
+    dir: '{{.USER_WORKING_DIR}}'
+    requires:
+      vars: [ARTIFACT_SOURCE_DIRECTORY]
+    cmds:
+      - pwsh -NoProfile -File "{{.TASKFILE_DIR}}/scripts/Stage-ArtifactDirectory.ps1" -SourceDirectory "{{.ARTIFACT_SOURCE_DIRECTORY}}" -DestinationDirectory "{{.ARTIFACT_DESTINATION_DIRECTORY}}" -CleanDestination:{{.ARTIFACT_CLEAN_DESTINATION}}
