@@ -1,0 +1,14 @@
+version: '3'
+
+vars:
+  PESTER_TEST_PATH: '{{.PESTER_TEST_PATH | default "."}}'
+  PESTER_TAGS: '{{.PESTER_TAGS | default ""}}'
+  PESTER_RESULTS_FILE: '{{.PESTER_RESULTS_FILE | default "./TestResults/pester-results.xml"}}'
+  PESTER_MIN_VERSION: '{{.PESTER_MIN_VERSION | default "4.0.0"}}'
+
+tasks:
+  test:
+    desc: Run Pester tests and emit NUnit XML
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - pwsh -NoProfile -File "{{.TASKFILE_DIR}}/scripts/Invoke-PesterTests.ps1" -Path "{{.PESTER_TEST_PATH}}" -Tags "{{.PESTER_TAGS}}" -ResultsFile "{{.PESTER_RESULTS_FILE}}" -MinimumVersion "{{.PESTER_MIN_VERSION}}"
