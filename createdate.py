@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
-"""pipeline_created_date.py — Fetch the creation date of a classic build/release pipeline.
+"""pipeline_created_date.py — Scan a tenant for classic build/release pipelines and their creation dates.
 
 USAGE:
-    python scripts/pipeline_created_date.py --org myorg --project myproj --pipeline-id 42 --pat $PAT
-    python scripts/pipeline_created_date.py --org myorg --project myproj --pipeline-name "CI-Main" \\
-        --pats-config config/pats.yml
-    python scripts/pipeline_created_date.py --org myorg --project myproj --pipeline-id 7 \\
-        --type release --pat $PAT
+    # Orgs + PATs from config file
+    python scripts/pipeline_created_date.py --pats-config config/pats.yml
 
-PAT resolution order: --pat, AZDO_PAT env var, --pats-config (entry for --org).
-Required PAT scopes: Build (Read), Release (Read).
+    # Single PAT, auto-discover every org the PAT's user belongs to
+    # (PAT must be created with "All accessible organizations")
+    python scripts/pipeline_created_date.py --pat $PAT
+
+    # Single PAT, explicit org list
+    python scripts/pipeline_created_date.py --pat $PAT --orgs org1 org2 --output out.csv
+
+PAT resolution: --pats-config, else --pat / AZDO_PAT env var.
+Required PAT scopes: Project and Team (Read), Build (Read), Release (Read);
+plus User Profile (Read) for org auto-discovery.
 """
 from __future__ import annotations
 
+import argparse
+import csv
 import os
 import sys
+from typing import Any, Iterator
+from urllib.parse import quote
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_LIGHTCLI_ROOT = os.path.dirname(_SCRIPT_DIR)
-if _LIGHTCLI_ROOT not in sys.path:
-    sys.path.insert(0, _LIGHTCLI_ROOT)
-
-import argparse
-import json
-from typing import Any
-
+import requests
 import yaml
 
-from engine.extractor.azure_api_client import AzureDevOpsApiClient
-
 API_VERSION = "7.1"
+VSSPS_URL = "https://app.vssps.visualstudio.com"
+TIMEOUT = 30
+CSV_FIELDS = [
+    "org", "project", "type", "id", "name", "path",
+    "created_date", "created_by", "last_modified", "revision",
+]
 
 
 def _load_pats(pats_config: str) -> dict[str, str]:
@@ -43,114 +48,149 @@ def _load_pats(pats_config: str) -> dict[str, str]:
     }
 
 
-def _resolve_pat(args: argparse.Namespace) -> str:
-    if args.pat:
-        return args.pat
-    env_pat = os.environ.get("AZDO_PAT", "").strip()
-    if env_pat:
-        return env_pat
+def _session(pat: str) -> requests.Session:
+    s = requests.Session()
+    s.auth = ("", pat)
+    s.headers.update({"Accept": "application/json"})
+    return s
+
+
+def _get(session: requests.Session, url: str, params: dict[str, Any] | None = None) -> requests.Response:
+    params = {"api-version": API_VERSION, **(params or {})}
+    resp = session.get(url, params=params, timeout=TIMEOUT, allow_redirects=False)
+    # Azure DevOps answers an invalid/expired PAT with 203 or a 302 to the sign-in page.
+    if resp.status_code in (203, 302):
+        raise RuntimeError(f"Authentication failed for {url} (HTTP {resp.status_code})")
+    if not resp.ok:
+        raise RuntimeError(f"HTTP {resp.status_code} for {url}: {resp.text[:200]}")
+    return resp
+
+
+def _paged(session: requests.Session, url: str, params: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
+    params = dict(params or {})
+    while True:
+        resp = _get(session, url, params)
+        yield from resp.json().get("value", [])
+        token = resp.headers.get("x-ms-continuationtoken")
+        if not token:
+            return
+        params["continuationToken"] = token
+
+
+def _discover_orgs(session: requests.Session) -> list[str]:
+    me = _get(session, f"{VSSPS_URL}/_apis/profile/profiles/me").json()
+    accounts = _get(session, f"{VSSPS_URL}/_apis/accounts", {"memberId": me["id"]}).json()
+    return sorted(a["accountName"] for a in accounts.get("value", []))
+
+
+def _list_projects(session: requests.Session, org: str) -> list[str]:
+    url = f"https://dev.azure.com/{quote(org)}/_apis/projects"
+    return [p["name"] for p in _paged(session, url, {"$top": 500})]
+
+
+def _classic_builds(session: requests.Session, org: str, project: str) -> Iterator[dict[str, Any]]:
+    base = f"https://dev.azure.com/{quote(org)}/{quote(project)}/_apis/build/definitions"
+    # processType=1 → designer (classic) pipelines only; YAML is 2.
+    for d in _paged(session, base, {"processType": 1, "$top": 500}):
+        # The definition's createdDate is the latest revision date; revision 1 is the true creation.
+        revisions = _get(session, f"{base}/{d['id']}/revisions").json().get("value", [])
+        first = min(revisions, key=lambda r: r.get("revision", 0)) if revisions else {}
+        yield {
+            "org": org,
+            "project": project,
+            "type": "build",
+            "id": d["id"],
+            "name": d.get("name"),
+            "path": d.get("path"),
+            "created_date": first.get("changedDate") or d.get("createdDate"),
+            "created_by": (first.get("changedBy") or {}).get("displayName"),
+            "last_modified": d.get("createdDate"),
+            "revision": d.get("revision"),
+        }
+
+
+def _classic_releases(session: requests.Session, org: str, project: str) -> Iterator[dict[str, Any]]:
+    url = f"https://vsrm.dev.azure.com/{quote(org)}/{quote(project)}/_apis/release/definitions"
+    for d in _paged(session, url, {"$top": 500}):
+        yield {
+            "org": org,
+            "project": project,
+            "type": "release",
+            "id": d["id"],
+            "name": d.get("name"),
+            "path": d.get("path"),
+            "created_date": d.get("createdOn"),
+            "created_by": (d.get("createdBy") or {}).get("displayName"),
+            "last_modified": d.get("modifiedOn"),
+            "revision": d.get("revision"),
+        }
+
+
+def _org_sessions(args: argparse.Namespace) -> dict[str, requests.Session]:
     if args.pats_config:
         pats = _load_pats(args.pats_config)
-        if args.org in pats:
-            return pats[args.org]
-        sys.exit(f"ERROR: No PAT for org '{args.org}' in {args.pats_config}")
-    sys.exit("ERROR: Provide --pat, set AZDO_PAT, or pass --pats-config.")
+        if args.orgs:
+            pats = {o: p for o, p in pats.items() if o in args.orgs}
+        if not pats:
+            sys.exit("ERROR: No matching orgs with PATs found in config.")
+        return {org: _session(pat) for org, pat in pats.items()}
 
-
-def _find_build_ids(client: AzureDevOpsApiClient, name: str) -> list[int]:
-    url = f"{client.base_url}/_apis/build/definitions"
-    data = client._request("GET", url, params={"name": name, "api-version": API_VERSION})
-    return [int(d["id"]) for d in data.get("value", []) if "id" in d]
-
-
-def _find_release_ids(client: AzureDevOpsApiClient, name: str) -> list[int]:
-    url = f"{client.vsrm_base_url}/_apis/release/definitions"
-    params = {"searchText": name, "isExactNameMatch": "true", "api-version": API_VERSION}
-    data = client._request("GET", url, params=params)
-    return [int(d["id"]) for d in data.get("value", []) if "id" in d]
-
-
-def _build_created(client: AzureDevOpsApiClient, pipeline_id: int) -> dict[str, Any]:
-    definition = client._request(
-        "GET",
-        f"{client.base_url}/_apis/build/definitions/{pipeline_id}",
-        params={"api-version": API_VERSION},
-    )
-    # Definition's own createdDate reflects the latest revision; revision 1 is the true creation.
-    revisions = client._request(
-        "GET",
-        f"{client.base_url}/_apis/build/definitions/{pipeline_id}/revisions",
-        params={"api-version": API_VERSION},
-    ).get("value", [])
-    first = min(revisions, key=lambda r: r.get("revision", 0)) if revisions else {}
-    return {
-        "type": "build",
-        "id": pipeline_id,
-        "name": definition.get("name"),
-        "path": definition.get("path"),
-        "createdDate": first.get("changedDate") or definition.get("createdDate"),
-        "createdBy": (first.get("changedBy") or {}).get("displayName"),
-        "currentRevision": definition.get("revision"),
-        "lastModifiedDate": definition.get("createdDate"),
-    }
-
-
-def _release_created(client: AzureDevOpsApiClient, pipeline_id: int) -> dict[str, Any]:
-    definition = client._request(
-        "GET",
-        f"{client.vsrm_base_url}/_apis/release/definitions/{pipeline_id}",
-        params={"api-version": API_VERSION},
-    )
-    return {
-        "type": "release",
-        "id": pipeline_id,
-        "name": definition.get("name"),
-        "path": definition.get("path"),
-        "createdDate": definition.get("createdOn"),
-        "createdBy": (definition.get("createdBy") or {}).get("displayName"),
-        "currentRevision": definition.get("revision"),
-        "lastModifiedDate": definition.get("modifiedOn"),
-    }
+    pat = args.pat or os.environ.get("AZDO_PAT", "").strip()
+    if not pat:
+        sys.exit("ERROR: Provide --pats-config, --pat, or set AZDO_PAT.")
+    session = _session(pat)
+    orgs = args.orgs or _discover_orgs(session)
+    if not orgs:
+        sys.exit("ERROR: No organizations discovered for this PAT.")
+    return {org: session for org in orgs}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch classic pipeline creation date.")
-    parser.add_argument("--org", required=True)
-    parser.add_argument("--project", required=True)
-    target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--pipeline-id", type=int)
-    target.add_argument("--pipeline-name")
-    parser.add_argument("--type", choices=["build", "release"], default="build")
-    parser.add_argument("--pat")
-    parser.add_argument("--pats-config")
-    parser.add_argument("--json", action="store_true", help="Output JSON")
+    parser = argparse.ArgumentParser(description="Scan all orgs/projects for classic pipeline creation dates.")
+    parser.add_argument("--pats-config", help="YAML with per-org PATs (see config/pats.example.yml)")
+    parser.add_argument("--pat", help="Single PAT (or set AZDO_PAT)")
+    parser.add_argument("--orgs", nargs="+", help="Limit scan to these orgs (default: all)")
+    parser.add_argument("--type", choices=["build", "release", "all"], default="all")
+    parser.add_argument("--output", default="classic-pipelines.csv", help="CSV output path")
     args = parser.parse_args()
 
-    client = AzureDevOpsApiClient(args.org, args.project, _resolve_pat(args))
-
-    if args.pipeline_id is not None:
-        ids = [args.pipeline_id]
-    else:
-        finder = _find_build_ids if args.type == "build" else _find_release_ids
-        ids = finder(client, args.pipeline_name)
-        if not ids:
-            sys.exit(f"ERROR: No {args.type} pipeline named '{args.pipeline_name}' found.")
-
-    fetch = _build_created if args.type == "build" else _release_created
     try:
-        results = [fetch(client, pid) for pid in ids]
+        org_sessions = _org_sessions(args)
     except RuntimeError as exc:
         sys.exit(f"ERROR: {exc}")
 
-    if args.json:
-        print(json.dumps(results, indent=2))
-        return
-    for r in results:
-        print(
-            f"[{r['type']}] #{r['id']} {(r['path'] or '').rstrip(chr(92))}\\{r['name']}\n"
-            f"  Created:       {r['createdDate']} by {r['createdBy']}\n"
-            f"  Last modified: {r['lastModifiedDate']} (rev {r['currentRevision']})"
-        )
+    scanners = []
+    if args.type in ("build", "all"):
+        scanners.append(_classic_builds)
+    if args.type in ("release", "all"):
+        scanners.append(_classic_releases)
+
+    total = 0
+    with open(args.output, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for org, session in org_sessions.items():
+            try:
+                projects = _list_projects(session, org)
+            except RuntimeError as exc:
+                print(f"[{org}] skipped: {exc}", file=sys.stderr)
+                continue
+            print(f"[{org}] {len(projects)} project(s)", file=sys.stderr)
+            for project in projects:
+                for scan in scanners:
+                    count = 0
+                    try:
+                        for row in scan(session, org, project):
+                            writer.writerow(row)
+                            count += 1
+                    except RuntimeError as exc:
+                        print(f"  [{project}] {scan.__name__} failed: {exc}", file=sys.stderr)
+                    total += count
+                    if count:
+                        print(f"  [{project}] {scan.__name__.lstrip('_')}: {count}", file=sys.stderr)
+                fh.flush()
+
+    print(f"\nDone. {total} classic pipeline(s) written to {args.output}")
 
 
 if __name__ == "__main__":
