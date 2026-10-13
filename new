@@ -1,1 +1,52 @@
-df -h
+migrating your Azure DevOps classic pipelines to YAML
+
+---
+
+Hi all,
+
+The **DevOps Guild** is starting the organisation-wide migration of Azure DevOps **classic build and release pipelines to YAML**. You're receiving this because you own one or more of these pipelines.
+
+**Why we're doing this**
+- **Pipelines as code:** versioned, reviewed through pull requests, and easy to audit.
+- **Consistency:** every pipeline uses central templates with security scanning built in.
+- **No stored secrets:** service connections sign in to Azure without passwords or certificates (Workload Identity Federation).
+- **Future-proofing:** classic pipelines are legacy in Azure DevOps, and YAML is a prerequisite for moving to GitHub later.
+
+**What the DevOps Guild will do**
+
+The Guild will do the migration work for you:
+- Review your pipelines with you and map your current approvals, gates and release windows to the new setup.
+- Generate the YAML pipeline and raise a pull request in your repository.
+- Set up Environments, approvals and service connections.
+- Deploy to your lower environments and confirm the new pipeline matches the classic one.
+- Support the first production deployment.
+- Retire the classic pipeline afterwards.
+
+**What we need from you**
+1. **Confirm ownership** of the pipelines listed for your team (list attached / [link]).
+2. **Name a contact** in your team for scheduling and questions.
+3. **Join a short kick-off** (~30 min) so we can understand your release process.
+4. **Review and approve** the pull request we raise in your repository.
+5. **Validate and test your application** in lower environments once we confirm the new pipeline has deployed it. **This is mandatory.** Treat it like a **small change or minor release**: your usual smoke and regression tests and key user journeys, with no new test cases. Please sign off on the migration work item when you're done.
+6. **Approve the production cut-over** in an agreed window.
+
+After cut-over, your team owns the YAML pipeline, just as you own the classic one today.
+
+**Can't engage when we schedule you?**
+
+You can choose **self-service** and migrate at your own pace by an agreed target date. You'll use the same templates, guidance and support, and the Guild reviews your pull request before cut-over. If the date slips, we'll move you back into the Guild-led queue.
+
+**Timeline**
+- Pilot teams: [dates]
+- Your team's planned slot: [date / to be confirmed at kick-off]
+- Classic pipeline creation will be disabled org-wide once most teams have migrated: [target date]
+
+**Support**
+- Confluence hub: [link] (What Good Looks Like, process, FAQ)
+- Office hours: [day/time, link]
+- Teams/Slack channel: [#channel]
+- DevOps Guild contact: [name, email]
+
+**Next step:** please reply by **[date]** with your team contact and confirm ownership of the attached pipelines. Any pipeline that isn't confirmed will be treated as unused and scheduled for retirement.
+
+Thanks for your support. This migration will make our delivery safer and simpler for everyone.
