@@ -1,0 +1,85 @@
+# Archive / unarchive an Azure Repo across tenants.
+# See identify-and-archive-unused-repos.md, section 6.7.
+trigger: none
+pr: none
+
+parameters:
+  - name: action
+    displayName: Action
+    type: string
+    values: [archive, unarchive]
+  - name: sourceOrg
+    displayName: Origin organisation (tenant)
+    type: string
+  - name: sourceProject
+    displayName: Origin project
+    type: string
+  - name: repoName
+    displayName: Repository name (as in the origin project)
+    type: string
+  - name: sourceAction
+    displayName: "Archive only: origin repo afterwards"
+    type: string
+    default: disable
+    values: [disable, delete]
+  - name: resume
+    displayName: "Archive only: resume a previously failed run"
+    type: boolean
+    default: false
+  - name: allowPipelines
+    displayName: "Archive only: allow repos with linked pipelines (disabled with the repo)"
+    type: boolean
+    default: false
+  - name: dryRun
+    displayName: Dry run (plan only, no changes)
+    type: boolean
+    default: true
+
+variables:
+  # Archive tenant: one org/project holds the read-only copies from all tenants
+  archiveOrg: contoso-archive
+  archiveProject: Archive
+  # PATs: add secret pipeline variables named "pat-<org>" (each origin org + archiveOrg) in the pipeline UI
+
+stages:
+  - stage: Plan
+    jobs:
+      - job: Plan
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - template: templates/repo-archive-steps.yml
+            parameters:
+              action: ${{ parameters.action }}
+              sourceOrg: ${{ parameters.sourceOrg }}
+              sourceProject: ${{ parameters.sourceProject }}
+              repoName: ${{ parameters.repoName }}
+              sourceAction: ${{ parameters.sourceAction }}
+              resume: ${{ parameters.resume }}
+              allowPipelines: ${{ parameters.allowPipelines }}
+              dryRun: true
+
+  - ${{ if eq(parameters.dryRun, false) }}:
+      - stage: Execute
+        dependsOn: Plan
+        jobs:
+          - deployment: Execute
+            pool:
+              vmImage: ubuntu-latest
+            # Add an Approvals check on this environment so every run is reviewed after the plan
+            environment: repo-archive
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - template: templates/repo-archive-steps.yml
+                      parameters:
+                        action: ${{ parameters.action }}
+                        sourceOrg: ${{ parameters.sourceOrg }}
+                        sourceProject: ${{ parameters.sourceProject }}
+                        repoName: ${{ parameters.repoName }}
+                        sourceAction: ${{ parameters.sourceAction }}
+                        resume: ${{ parameters.resume }}
+                        allowPipelines: ${{ parameters.allowPipelines }}
+                        dryRun: false
